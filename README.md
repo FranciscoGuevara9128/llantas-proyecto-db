@@ -98,50 +98,6 @@ El script `00\_setup.sql` utiliza comandos `:r` de SQLCMD, por lo tanto:
 
 
 
-\## ▶️
-
-
-
-
-
-\---
-
-
-
-\## ⚙️ Requisitos
-
-
-
-\- SQL Server instalado
-
-\- Herramienta `sqlcmd` disponible en el sistema
-
-
-
-\---
-
-
-
-\## 🚀 Ejecución del proyecto
-
-
-
-\### ⚠️ IMPORTANTE
-
-El script `00\_setup.sql` utiliza comandos `:r` de SQLCMD, por lo tanto:
-
-
-
-❌ \*\*NO funciona correctamente desde SSMS (SQL Server Management Studio)\*\*  
-
-✅ \*\*Debe ejecutarse desde la terminal\*\*
-
-
-
-\---
-
-
-
 \## ▶️ Ejecución paso a paso
 
 
