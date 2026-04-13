@@ -52,4 +52,3 @@ GO
 :r ".\01_esquema\indices.sql"
 GO
 :r ".\02_datos_iniciales\inserts.sql"
-GO
