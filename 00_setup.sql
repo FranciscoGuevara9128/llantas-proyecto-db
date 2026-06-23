@@ -94,5 +94,14 @@ GO
 :r ".\07_monitoreo_automatizacion\02_sql_jobs.sql"
 GO
 
+-- -------------------------------------------------------------------------
+-- FASE 8: OBJETOS PROGRAMABLES (VISTAS Y PROCEDIMIENTOS ALMACENADOS)
+-- -------------------------------------------------------------------------
+PRINT 'FASE 8: Creando vistas y procedimientos almacenados...';
+:r ".\08_objetos_programables\01_vistas.sql"
+GO
+:r ".\08_objetos_programables\02_procedimientos.sql"
+GO
+
 PRINT '=== ¡DESPLIEGUE GLOBAL DE LA BASE DE DATOS FINALIZADO EXITOSAMENTE! ===';
 GO
