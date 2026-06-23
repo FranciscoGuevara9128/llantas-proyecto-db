@@ -13,6 +13,7 @@ Incluye el ciclo de vida completo de administración de base de datos:
 - Optimización y mantenimiento preventivo
 - Respaldo y recuperación ante desastres
 - Monitoreo activo y automatización de tareas
+- Objetos programables: vistas, procedimientos almacenados
 
 ---
 
@@ -43,14 +44,21 @@ llantas-Proyecto/
 │   └── 03_auditoria.sql          ← Server Audit y Database Audit Specification
 │
 ├── 05_optimizacion/
-│   └── 01_mantenimiento_preventivo.sql  ← Rebuild de índices y sp_updatestats
+│   ├── 01_mantenimiento_preventivo.sql  ← Mantenimiento condicional + DBCC CHECKDB
+│   └── 02_actualizar_job_mantenimiento.sql  ← Actualiza el Job con los 2 pasos
 │
 ├── 06_respaldo_recuperacion/
-│   └── 01_configuracion_backup.sql      ← Recovery FULL, Full Backup, Log Backup y prueba de restauración
+│   └── 01_configuracion_backup.sql      ← Recovery FULL, backups y prueba de restauración
 │
 ├── 07_monitoreo_automatizacion/
-│   ├── 01_alertas_eventos.sql    ← Extended Events (XEvents) para errores críticos
-│   └── 02_sql_jobs.sql           ← SQL Server Agent Jobs programados
+│   ├── 01_alertas_eventos.sql    ← Extended Events: sesión Error_Session_Llantas
+│   ├── 02_sql_jobs.sql           ← SQL Server Agent Jobs programados
+│   ├── 03_database_mail.sql      ← Database Mail (Gmail SMTP) + operador + notificaciones
+│   └── 04_consultas_xevents.sql  ← Consultas de análisis del Ring Buffer y Event File
+│
+├── 08_objetos_programables/
+│   ├── 01_vistas.sql             ← Vistas (prefijo vw_)
+│   └── 02_procedimientos.sql     ← Procedimientos almacenados (prefijo usp_)
 │
 └── backup/                       ← Archivos generados (ignorados por Git)
 ```
@@ -61,7 +69,7 @@ llantas-Proyecto/
 
 - SQL Server instalado (Express o superior)
 - Herramienta `sqlcmd` disponible en el sistema
-- SQL Server Agent activo (requerido para la Fase 7)
+- SQL Server Agent activo (requerido para las Fases 7 y 8)
 
 ---
 
@@ -90,7 +98,7 @@ sqlcmd -S localhost -i "00_setup.sql"
 
 ## 📌 ¿Qué hace el script maestro?
 
-El archivo `00_setup.sql` ejecuta en orden las 7 fases del proyecto:
+El archivo `00_setup.sql` ejecuta en orden las 8 fases del proyecto:
 
 | Fase | Descripción |
 |------|-------------|
@@ -98,9 +106,10 @@ El archivo `00_setup.sql` ejecuta en orden las 7 fases del proyecto:
 | **2** | Inserción de datos iniciales de prueba |
 | **3** | Aplicación de migraciones y refactorizaciones de esquema |
 | **4** | Configuración de logins, roles, permisos y auditoría |
-| **5** | Mantenimiento preventivo de índices y estadísticas |
+| **5** | Mantenimiento preventivo de índices (condicional) y verificación de integridad |
 | **6** | Configuración del Recovery Model FULL y generación de backups iniciales |
-| **7** | Activación de Extended Events y programación de SQL Agent Jobs |
+| **7** | Extended Events, SQL Agent Jobs, Database Mail y consultas de análisis |
+| **8** | Creación de vistas y procedimientos almacenados |
 
 ---
 
@@ -134,9 +143,40 @@ El proyecto implementa tres roles con permisos diferenciados:
 
 | Rol | Acceso |
 |-----|--------|
-| `Rol_Facturacion` | DML en ventas y clientes. Prohibido borrar facturas o modificar catálogo. |
-| `Rol_Auditor` | Solo lectura en todas las tablas. Sin modificaciones. |
+| `Rol_Facturacion` | DML en ventas y clientes. `DENY DELETE` en facturas. `DENY INSERT/UPDATE/DELETE` en catálogo. |
+| `Rol_Auditor` | `SELECT` en todas las tablas. `DENY` global de escritura. |
 | `Rol_Admin_Jr` | DML completo + `VIEW DEFINITION` para soporte técnico. |
+
+**Auditoría activa:**
+- `Server Audit` → captura `FAILED_LOGIN_GROUP` en `APPLICATION_LOG`
+- `Database Audit Specification` → monitorea DML en tablas críticas y cambios de esquema (`SCHEMA_OBJECT_CHANGE_GROUP`)
+- Triggers `AFTER UPDATE` en todas las tablas para registrar `ModificationDate` y `ModificationUser`
+
+---
+
+## 🛠️ Plan de Mantenimiento (Fase 5)
+
+El mantenimiento preventivo se ejecuta en dos etapas:
+
+### Etapa 1 — Mantenimiento condicional de índices
+
+| Fragmentación | Acción |
+|---|---|
+| < 10% | Sin acción (costo > beneficio) |
+| 10% – 30% | `REORGANIZE` — reorganiza páginas en línea sin bloquear |
+| > 30% | `REBUILD` — reconstrucción completa del índice |
+
+### Etapa 2 — Verificación de integridad
+
+```sql
+DBCC CHECKDB ('llantas') WITH NO_INFOMSGS, ALL_ERRORMSGS;
+```
+
+Detecta corrupción física en páginas y estructuras internas de la base de datos.
+
+**Job automatizado:** `Job_Llantas_Mantenimiento_Semanal` (domingos 02:00)
+- Paso 1: Mantenimiento condicional de índices + `sp_updatestats`
+- Paso 2: `DBCC CHECKDB`
 
 ---
 
@@ -146,19 +186,60 @@ El proyecto implementa tres roles con permisos diferenciados:
 - **Full Backup:** `backup/llantas_full.bak`
 - **Log Backup:** `backup/llantas_log.bak`
 - **Prueba de restauración:** crea `llantas_Restaurada` para validar la cadena de backups
-- **Fallback automático** a la ruta del sistema si la ruta del proyecto no tiene permisos de escritura
+- **Fallback automático** a la ruta del sistema si la ruta del proyecto no tiene permisos
 
 > Los archivos generados en `backup/` están excluidos del control de versiones (ver `.gitignore`).
 
 ---
 
-## ⏰ Jobs Automatizados (Fase 7)
+## 📡 Monitoreo y Automatización (Fase 7)
+
+### Extended Events
+
+Sesión `Error_Session_Llantas` — captura errores con `severity >= 17`:
+
+| Target | Descripción |
+|---|---|
+| `ring_buffer` | Últimos eventos en memoria RAM (consulta inmediata) |
+| `event_file` | Eventos persistidos en disco (`Error_Session_Llantas*.xel`) |
+
+**Análisis:** `04_consultas_xevents.sql` incluye consultas listas para demostrar la captura en tiempo real durante la exposición.
+
+### SQL Server Agent Jobs
 
 | Job | Programación |
 |-----|-------------|
 | `Job_Llantas_Respaldo_Full_Semanal` | Domingos a las 00:00 |
 | `Job_Llantas_Respaldo_Log_Frecuente` | Lun–Sáb cada 2 horas |
-| `Job_Llantas_Mantenimiento_Semanal` | Domingos a las 02:00 |
+| `Job_Llantas_Mantenimiento_Semanal` | Domingos a las 02:00 (2 pasos) |
+
+### Database Mail
+
+- **Cuenta:** `Cuenta_Llantas_Gmail` → `smtp.gmail.com:587` (TLS)
+- **Perfil:** `Perfil_Llantas` (predeterminado público)
+- **Operador:** `Operador_DBA_Llantas` → notificaciones automáticas en caso de fallo de cualquier Job
+
+---
+
+## 🧩 Objetos Programables (Fase 8)
+
+### Vistas (`vw_`)
+
+| Vista | Descripción |
+|-------|-------------|
+| `vw_InvoiceComplete` | Factura completa: cabecera + detalle + cliente + producto + marca |
+| `vw_InventoryStatus` | Stock actual con semáforo: Crítico / Bajo / Normal / Excedente |
+| `vw_SalesSummaryByProduct` | Ventas totales por producto: unidades, ingresos, precio promedio |
+| `vw_VendorDirectory` | Directorio de proveedores con representantes y contactos |
+
+### Procedimientos Almacenados (`usp_`)
+
+| Procedimiento | Parámetros | Descripción |
+|---|---|---|
+| `usp_GetCustomerInvoices` | `@IDCustomer`, `@StartDate?`, `@EndDate?` | Historial de facturas de un cliente con filtro de fecha |
+| `usp_GetLowStockProducts` | `@CriticalOnly?` | Productos bajo el mínimo de stock con costo estimado de reposición |
+| `usp_GetProductPriceHistory` | `@IDProduct` | Historial de precios con precio vigente identificado |
+| `usp_GetSalesReport` | `@StartDate`, `@EndDate` | Reporte de ventas por producto con totales (`GROUP BY ROLLUP`) |
 
 ---
 
