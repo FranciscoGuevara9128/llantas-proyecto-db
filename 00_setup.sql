@@ -77,6 +77,8 @@ GO
 PRINT 'FASE 5: Ejecutando optimización y mantenimiento preventivo de índices...';
 :r ".\05_optimizacion\01_mantenimiento_preventivo.sql"
 GO
+:r ".\05_optimizacion\02_actualizar_job_mantenimiento.sql"
+GO
 
 -- -------------------------------------------------------------------------
 -- FASE 6: ESTRATEGIA DE RESPALDO Y RECUPERACIÓN ANTE DESASTRES
