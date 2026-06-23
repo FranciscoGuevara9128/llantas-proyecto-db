@@ -93,6 +93,8 @@ PRINT 'FASE 7: Activando Extended Events y programando SQL Server Agent Jobs...'
 GO
 :r ".\07_monitoreo_automatizacion\02_sql_jobs.sql"
 GO
+:r ".\07_monitoreo_automatizacion\03_database_mail.sql"
+GO
 
 -- -------------------------------------------------------------------------
 -- FASE 8: OBJETOS PROGRAMABLES (VISTAS Y PROCEDIMIENTOS ALMACENADOS)
